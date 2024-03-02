@@ -16,7 +16,7 @@ use tower::{Layer, Service};
 
 use crate::core::{
     config::{Config, ConfigBuilder},
-    login::{WxLogin, WxLoginErr, WxLoginOk, LOGIN_FAIL_MSG},
+    login::{WxLogin, WxLoginErr, WxLoginOk, LOGIN_FAIL_MSG, Error},
 };
 
 #[derive(Clone)]
@@ -65,7 +65,7 @@ where
         self.inner.poll_ready(cx).map(|r| r.or(Ok(())))
     }
 
-    fn call(&mut self, req: Request) -> Self::Future {
+    fn call(&mut self, mut req: Request) -> Self::Future {
         #[derive(Deserialize)]
         struct LoginRequest {
             appid: String,
@@ -80,17 +80,17 @@ where
                     let LoginRequest { appid, code } = match req.method() {
                         &Method::GET => {
                             Query::<LoginRequest>::try_from_uri(req.uri())
-                                .map_err(err_resp("parse-get-params-fail"))?
+                                .map_err(err_resp(400, "parse-get-params-fail"))?
                                 .0
                         }
                         &Method::POST => {
                             Json::<LoginRequest>::from_request(req, &())
                                 .await
-                                .map_err(err_resp("parse-post-json-fail"))?
+                                .map_err(err_resp(400, "parse-post-json-fail"))?
                                 .0
                         }
-                        meth => Err(axum::Error::new(meth.to_string()))
-                            .map_err(err_resp("unexpected-http-method"))?,
+                        meth => Err(Error::from(meth.to_string()))
+                            .map_err(err_resp(500, "unexpected-http-method"))?,
                     };
                     myself
                         .wx_login
@@ -99,22 +99,35 @@ where
                         .map(|v| v.into_response())
                         .map_err(|v| v.into_response())
                 } else {
+                    let header_stoken = req
+                        .headers()
+                        .get("WX-LOGIN-STOKEN")
+                        .ok_or(Error::from("no WX-LOGIN-STOKEN header"));
+                    let stoken = header_stoken
+                        .and_then(|header_stoken| {
+                            header_stoken.to_str().map_err(|e| Error::from(e.to_string()))
+                        });
+                    let server_session = stoken
+                        .and_then(|stoken| {
+                            myself.wx_login.authenticate(stoken)
+                        });
+                    req.extensions_mut().insert(server_session);
                     myself
                         .inner
                         .call(req)
                         .await
-                        .map_err(err_resp("inner-service-fail"))
+                        .map_err(err_resp(500, "inner-service-fail"))
                 }
             }
-            .or_else(|err_resp| async move { Ok(err_resp) }),
+            .or_else(|error_resp| async move { Ok(error_resp) }),
         )
     }
 }
 
-fn err_resp<E: Display>(code: &str) -> impl '_ + FnOnce(E) -> Response {
+fn err_resp<E: Display>(status: u16, code: &str) -> impl '_ + FnOnce(E) -> Response {
     move |e| {
         WxLoginErr {
-            status: 500,
+            status,
             code: code.into(),
             message: LOGIN_FAIL_MSG.into(),
             detail: e.to_string(),
