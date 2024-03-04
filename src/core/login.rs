@@ -6,23 +6,46 @@ use std::{fmt::Display, sync::Arc};
 use tiny_crypto::encoding::{Encoder, BASE64};
 
 pub use crate::core::security::Error;
-use crate::core::security::ServerSession;
+pub use crate::core::security::ServerSession as Secret;
 
 pub(crate) const LOGIN_FAIL_MSG: &str = "登录验证失败";
+pub(crate) const AUTH_FAIL_MSG: &str = "登录会话验证失败";
+pub(crate) const WX_JSCODE2SESSION_URL: &str = "https://api.weixin.qq.com/sns/jscode2session";
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct WxLoginOk {
     pub openid: String,
     pub stoken: String,
     pub skey: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct WxLoginErr {
     pub status: u16,
     pub code: String,
     pub message: String,
     pub detail: String,
+}
+
+#[derive(Debug)]
+pub struct WxLoginInfoInner {
+    pub appid: String,
+    pub openid: String,
+    pub secret: Secret,
+}
+
+#[derive(Debug, Clone)]
+pub struct WxLoginInfo(Arc<WxLoginInfoInner>);
+impl WxLoginInfo {
+    pub fn new(inner: WxLoginInfoInner) -> Self {
+        Self(Arc::new(inner))
+    }
+}
+impl std::ops::Deref for WxLoginInfo {
+    type Target = WxLoginInfoInner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +58,9 @@ impl WxLogin {
         Self { cfg }
     }
 
+    #[tracing::instrument(err(Debug), ret, skip_all)]
     pub async fn handle_login(&self, appid: String, code: String) -> Result<WxLoginOk, WxLoginErr> {
+        tracing::info!("start handle_login({appid}, {code})");
         let app_info = self.cfg.app_map.get(&appid).ok_or(WxLoginErr {
             status: 401,
             code: "appid-not-found".into(),
@@ -43,9 +68,9 @@ impl WxLogin {
             detail: "".into(),
         })?;
         let client = reqwest::Client::new();
-        let url = "https://api.weixin.qq.com/sns/jscode2session";
+        let url = WX_JSCODE2SESSION_URL;
         let code2sess_req =
-            proto::Code2SessionRequest::from(appid.clone(), app_info.secret.clone(), code);
+            proto::Code2SessionRequest::from(appid.clone(), app_info.secret.0.clone(), code);
         let res = client
             .get(url)
             .query(&code2sess_req)
@@ -73,11 +98,17 @@ impl WxLogin {
         })
     }
 
-    pub fn authenticate(&self, stoken: &str) -> Result<ServerSession, Error> {
+    #[tracing::instrument(err, ret, skip(self))]
+    pub fn authenticate(&self, stoken: &str, uri: &str) -> Result<WxLoginInfo, Error> {
         let (appid, openid, token_str) = stoken.split("::").next_tuple().unwrap();
         let app_info = self.cfg.app_map.get(appid).ok_or("appid not found")?;
         let authority = Authority::new(app_info);
-        authority.auth_client_session(openid, token_str, None)
+        let secret = authority.auth_client_session(openid, token_str, None)?;
+        Ok(WxLoginInfo::new(WxLoginInfoInner {
+            appid: appid.into(),
+            openid: openid.into(),
+            secret,
+        }))
     }
 }
 

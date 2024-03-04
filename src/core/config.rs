@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
+use crate::core::security::secret_utils::SecretString;
+
 #[derive(Default, Debug, Clone)]
 pub struct AppInfo {
     pub(crate) appid: String,
-    pub(crate) secret: String,
+    pub(crate) secret: SecretString,
 }
 impl AppInfo {
     pub fn from(appid: String, secret: String) -> Self {
-        Self { appid, secret }
+        Self { appid, secret: SecretString(secret) }
     }
 }
 
@@ -47,7 +49,7 @@ impl ConfigBuilder {
         self
     }
     pub fn build(self) -> Config {
-        tracing::info!("build {:?}", self.cfg);
+        tracing::info!("use {:?}", self.cfg);
         self.cfg
     }
 }

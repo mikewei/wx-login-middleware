@@ -1,6 +1,8 @@
 pub mod wx_login {
-    pub use crate::core::config::{AppInfo, Config, ConfigBuilder};
-    pub use crate::core::login::{WxLogin, WxLoginErr, WxLoginOk, Error};
     #[cfg(feature = "axum")]
-    pub use crate::axum::{WxLoginLayer, WxLoginService};
+    pub use crate::axum::{
+        layer_with_env_var, WxLoginAuthResult, WxLoginInfoRejection, WxLoginLayer, WxLoginService,
+    };
+    pub use crate::core::config::{AppInfo, Config, ConfigBuilder};
+    pub use crate::core::login::{Error, WxLogin, WxLoginErr, WxLoginInfo, WxLoginOk};
 }

@@ -12,23 +12,23 @@ const SESSION_TOKEN_TAG: u32 = 0x68686868;
 
 #[derive(Debug, Clone)]
 pub struct Error {
-    err_string: String,
+    err: String,
 }
 impl From<&str> for Error {
     fn from(err_str: &str) -> Self {
         Self {
-            err_string: err_str.into(),
+            err: err_str.into(),
         }
     }
 }
 impl From<String> for Error {
-    fn from(err_string: String) -> Self {
-        Self { err_string }
+    fn from(err: String) -> Self {
+        Self { err }
     }
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.err_string)
+        f.write_str(&self.err)
     }
 }
 impl std::error::Error for Error {}
@@ -56,7 +56,7 @@ impl<'a> Authority<'a> {
     }
 
     fn make_token_key(&self, openid: &str) -> [u8; 16] {
-        tiny_crypto::sha1!(self.app_info.secret.as_bytes(), openid.as_bytes())[..16]
+        tiny_crypto::sha1!(self.app_info.secret.0.as_bytes(), openid.as_bytes())[..16]
             .try_into()
             .unwrap()
     }
@@ -159,23 +159,61 @@ impl SessionToken {
     }
 }
 
+pub mod secret_utils {
+    use std::cmp::min;
+
+    #[derive(Default, Clone)]
+    pub struct SecretString(pub String);
+
+    impl std::fmt::Debug for SecretString {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_tuple("SecretString").field(&mask_string(&self.0)).finish()
+        }
+    }
+
+    fn mask_string(origin: &str) -> String {
+        let plain_len = min(origin.len() / 4, 6);
+        origin
+            .char_indices()
+            .map(|(i, c)| if i < plain_len { c } else { '*' })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use tests::secret_utils::SecretString;
+
     use super::*;
 
     #[test]
     fn make_and_auth() {
         let app_info = AppInfo {
             appid: "some_appid".into(),
-            secret: "some_secret".into(),
+            secret: SecretString("some_secret".into()),
         };
         let openid = "some-openid";
         let auth = Authority::new(&app_info);
-        let session_key: [u8; 16] = BASE64.from_text("HyVFkGl5F5OQWJZZaNzBBg==").unwrap().try_into().unwrap();
+        let session_key: [u8; 16] = BASE64
+            .from_text("HyVFkGl5F5OQWJZZaNzBBg==")
+            .unwrap()
+            .try_into()
+            .unwrap();
         let client_sess = auth.make_client_session(openid, &session_key);
         println!("client_sess: {:?}", client_sess);
-        let server_sess = auth.auth_client_session(openid, &client_sess.sess_token, None).unwrap();
+        let server_sess = auth
+            .auth_client_session(openid, &client_sess.sess_token, None)
+            .unwrap();
         println!("server_sess: {:?}", server_sess);
-        assert_eq!(client_sess.sess_key, BASE64.to_text(&server_sess.client_sess_key));
+        assert_eq!(
+            client_sess.sess_key,
+            BASE64.to_text(&server_sess.client_sess_key)
+        );
+    }
+    #[test]
+    fn secret_string() {
+        use secret_utils::SecretString;
+        let sec_str = SecretString("abcdefgh1234567890".into());
+        assert_eq!(format!("{:?}", sec_str), "SecretString(\"abcd**************\")");
     }
 }

@@ -1,6 +1,7 @@
 use axum::{
-    extract::{FromRequest, Query, Request},
-    http::{Method, StatusCode},
+    async_trait,
+    extract::{FromRequest, FromRequestParts, Query, Request},
+    http::{request::Parts, Method, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -16,8 +17,14 @@ use tower::{Layer, Service};
 
 use crate::core::{
     config::{Config, ConfigBuilder},
-    login::{WxLogin, WxLoginErr, WxLoginOk, LOGIN_FAIL_MSG, Error},
+    login::{Error, WxLogin, WxLoginErr, WxLoginInfo, WxLoginOk, AUTH_FAIL_MSG, LOGIN_FAIL_MSG},
 };
+
+pub type WxLoginAuthResult = Result<WxLoginInfo, Error>;
+
+pub fn layer_with_env_var() -> WxLoginLayer {
+    WxLoginLayer::new_with_env_var()
+}
 
 #[derive(Clone)]
 pub struct WxLoginLayer {
@@ -40,7 +47,7 @@ impl<S> Layer<S> for WxLoginLayer {
     fn layer(&self, inner: S) -> Self::Service {
         WxLoginService {
             inner,
-            wx_login: Arc::new(WxLogin::new(self.cfg.clone())),
+            wx_login: WxLogin::new(self.cfg.clone()),
         }
     }
 }
@@ -48,7 +55,7 @@ impl<S> Layer<S> for WxLoginLayer {
 #[derive(Clone)]
 pub struct WxLoginService<S> {
     inner: S,
-    wx_login: Arc<WxLogin>,
+    wx_login: WxLogin,
 }
 
 impl<S> Service<Request> for WxLoginService<S>
@@ -103,15 +110,17 @@ where
                         .headers()
                         .get("WX-LOGIN-STOKEN")
                         .ok_or(Error::from("no WX-LOGIN-STOKEN header"));
-                    let stoken = header_stoken
-                        .and_then(|header_stoken| {
-                            header_stoken.to_str().map_err(|e| Error::from(e.to_string()))
-                        });
-                    let server_session = stoken
-                        .and_then(|stoken| {
-                            myself.wx_login.authenticate(stoken)
-                        });
-                    req.extensions_mut().insert(server_session);
+                    let stoken = header_stoken.and_then(|header_stoken| {
+                        header_stoken
+                            .to_str()
+                            .map_err(|e| Error::from(e.to_string()))
+                    });
+                    let auth_info: WxLoginAuthResult = stoken.and_then(|stoken| {
+                        myself
+                            .wx_login
+                            .authenticate(stoken, &req.uri().to_string())
+                    });
+                    req.extensions_mut().insert(auth_info);
                     myself
                         .inner
                         .call(req)
@@ -133,6 +142,34 @@ fn err_resp<E: Display>(status: u16, code: &str) -> impl '_ + FnOnce(E) -> Respo
             detail: e.to_string(),
         }
         .into_response()
+    }
+}
+
+pub type WxLoginInfoRejection = WxLoginErr;
+
+#[async_trait]
+impl<S> FromRequestParts<S> for WxLoginInfo
+where
+    S: Send + Sync,
+{
+    type Rejection = WxLoginInfoRejection;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        match parts.extensions.get::<WxLoginAuthResult>() {
+            Some(Ok(login_info)) => Ok(login_info.clone()),
+            Some(Err(err)) => Err(WxLoginErr {
+                status: 401,
+                code: "auth-login-session-fail".into(),
+                message: AUTH_FAIL_MSG.into(),
+                detail: err.to_string(),
+            }),
+            None => Err(WxLoginErr {
+                status: 500,
+                code: "login-session-lost".into(),
+                message: AUTH_FAIL_MSG.into(),
+                detail: "".into(),
+            }),
+        }
     }
 }
 
