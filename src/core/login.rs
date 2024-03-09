@@ -2,6 +2,7 @@ use crate::core::config::Config;
 use crate::core::security::Authority;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
 use tiny_crypto::encoding::{Encoder, BASE64};
 
@@ -32,6 +33,7 @@ pub struct WxLoginInfoInner {
     pub appid: String,
     pub openid: String,
     pub secret: Secret,
+    pub sig_authed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -93,21 +95,48 @@ impl WxLogin {
         let client_sess = authority.make_client_session(&openid, &session_key);
         Ok(WxLoginOk {
             openid: openid.clone(),
-            stoken: [appid, openid, client_sess.sess_token].join("::"),
+            stoken: ["ST1".into(), appid, openid, client_sess.sess_token].join(":"),
             skey: client_sess.sess_key,
         })
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub fn authenticate(&self, stoken: &str, uri: &str) -> Result<WxLoginInfo, Error> {
-        let (appid, openid, token_str) = stoken.split("::").next_tuple().unwrap();
+    pub fn authenticate(
+        &self,
+        stoken: &str,
+        uri: &str,
+        sig: Result<&str, Error>,
+    ) -> Result<WxLoginInfo, Error> {
+        let (tag, appid, openid, token_str) =
+            stoken.split(":").next_tuple().ok_or("bad stoken format")?;
+        if tag != "ST1" {
+            return Err(format!("bad stoken tag:{tag}").into());
+        }
         let app_info = self.cfg.app_map.get(appid).ok_or("appid not found")?;
         let authority = Authority::new(app_info);
-        let secret = authority.auth_client_session(openid, token_str, None)?;
+        let secret = authority.auth_client_session(openid, token_str)?;
+        let mut sig_authed = false;
+        if self.cfg.auth_sig {
+            let (tag, ts_ms_str, nonce_str, sig_str) =
+                sig?.split(":").next_tuple().ok_or("bad sig format")?;
+            if tag != "SG1" {
+                return Err(format!("bad sig tag:{tag}").into());
+            }
+            authority.auth_client_sig(
+                &BASE64.to_text(&secret.client_sess_key),
+                uri,
+                ts_ms_str,
+                nonce_str,
+                sig_str,
+                |dur, _nonce| dur <= Duration::from_secs(self.cfg.sig_valid_secs),
+            )?;
+            sig_authed = true;
+        }
         Ok(WxLoginInfo::new(WxLoginInfoInner {
             appid: appid.into(),
             openid: openid.into(),
             secret,
+            sig_authed,
         }))
     }
 }

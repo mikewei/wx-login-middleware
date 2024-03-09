@@ -116,9 +116,16 @@ where
                             .map_err(|e| Error::from(e.to_string()))
                     });
                     let auth_info: WxLoginAuthResult = stoken.and_then(|stoken| {
-                        myself
-                            .wx_login
-                            .authenticate(stoken, &req.uri().to_string())
+                        let header_sig = req
+                            .headers()
+                            .get("WX-LOGIN-SIG")
+                            .ok_or(Error::from("no WX-LOGIN-SIG header"));
+                        let sig = header_sig.and_then(|header_sig| {
+                            header_sig
+                                .to_str()
+                                .map_err(|e| Error::from(e.to_string()))
+                        });
+                        myself.wx_login.authenticate(stoken, &req.uri().to_string(), sig)
                     });
                     req.extensions_mut().insert(auth_info);
                     myself

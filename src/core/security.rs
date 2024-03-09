@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tiny_crypto::{
     encoding::{Encoder, BASE64},
+    sha1,
     sym::{Aes128, Cipher},
 };
 
@@ -85,7 +86,7 @@ impl<'a> Authority<'a> {
     ) -> String {
         let token_bin = bincode::serialize(st).unwrap();
         let token_enc = Aes128::from_key_array(key).encrypt_with_iv(iv, &token_bin);
-        String::from("ST1:") + &BASE64.to_text(&token_enc)
+        BASE64.to_text(&token_enc)
     }
 
     fn auth_client_sess_token_str(
@@ -120,12 +121,7 @@ impl<'a> Authority<'a> {
         &self,
         openid: &str,
         token_str: &str,
-        _sig: Option<&str>,
     ) -> Result<ServerSession, Error> {
-        if !token_str.starts_with("ST1:") {
-            return Err(format!("bad token string: {}", token_str).into());
-        }
-        let token_str = &token_str[4..];
         let token_key = self.make_token_key(openid);
         let token_iv = self.make_token_iv(openid);
         let sess_token = self.auth_client_sess_token_str(token_str, &token_key, &token_iv)?;
@@ -134,6 +130,32 @@ impl<'a> Authority<'a> {
             client_sess_key: self.make_client_sess_key(&sess_token.session_key, sess_token.seed),
             client_sess_time: UNIX_EPOCH + Duration::from_secs(sess_token.ts as u64),
         })
+    }
+
+    pub fn auth_client_sig(
+        &self,
+        skey: &str,
+        url: &str,
+        ts_ms_str: &str,
+        nonce_str: &str,
+        sig_str: &str,
+        validate: impl FnOnce(Duration, u64) -> bool
+    ) -> Result<(), Error> {
+        let digist =
+            sha1!((url.to_string() + ":" + ts_ms_str + ":" + nonce_str + ":" + skey).as_bytes());
+        if hex::encode(digist) != sig_str {
+            Err("bad sig value")?;
+        }
+        let ts_ms = ts_ms_str.parse::<u64>().map_err(|e| e.to_string())?;
+        let ts = UNIX_EPOCH + Duration::from_millis(ts_ms);
+        let dur = SystemTime::now()
+            .duration_since(ts)
+            .map_err(|e| e.to_string())?;
+        let nonce = nonce_str.parse::<u64>().map_err(|e| e.to_string())?;
+        if !validate(dur, nonce) {
+            Err("ts or nonce is invalid")?;
+        }
+        Ok(())
     }
 }
 
@@ -167,7 +189,9 @@ pub mod secret_utils {
 
     impl std::fmt::Debug for SecretString {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_tuple("SecretString").field(&mask_string(&self.0)).finish()
+            f.debug_tuple("SecretString")
+                .field(&mask_string(&self.0))
+                .finish()
         }
     }
 
@@ -202,7 +226,7 @@ mod tests {
         let client_sess = auth.make_client_session(openid, &session_key);
         println!("client_sess: {:?}", client_sess);
         let server_sess = auth
-            .auth_client_session(openid, &client_sess.sess_token, None)
+            .auth_client_session(openid, &client_sess.sess_token)
             .unwrap();
         println!("server_sess: {:?}", server_sess);
         assert_eq!(
@@ -214,6 +238,9 @@ mod tests {
     fn secret_string() {
         use secret_utils::SecretString;
         let sec_str = SecretString("abcdefgh1234567890".into());
-        assert_eq!(format!("{:?}", sec_str), "SecretString(\"abcd**************\")");
+        assert_eq!(
+            format!("{:?}", sec_str),
+            "SecretString(\"abcd**************\")"
+        );
     }
 }
