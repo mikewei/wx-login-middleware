@@ -10,6 +10,7 @@ pub use crate::core::security::Error;
 pub use crate::core::security::ServerSession as Secret;
 
 pub(crate) const LOGIN_FAIL_MSG: &str = "登录验证失败";
+#[allow(dead_code)]
 pub(crate) const AUTH_FAIL_MSG: &str = "登录会话验证失败";
 pub(crate) const WX_JSCODE2SESSION_URL: &str = "https://api.weixin.qq.com/sns/jscode2session";
 

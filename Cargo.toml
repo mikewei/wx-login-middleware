@@ -25,3 +25,8 @@ axum = ["dep:axum", "dep:tower"]
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+[[example]]
+name = "axum_simple"
+path = "examples/axum_simple.rs"
+required-features = ["axum"]
