@@ -8,7 +8,7 @@ pub mod wx_login {
     #[cfg(feature = "axum")]
     pub mod actix_web {
         pub use crate::actix_web::{
-            WxLogin, WxLoginMiddleware,
+            middleware_with_env_var, WxLoginMiddleware, WxLoginMiddlewareService,
         };
     }
     pub use crate::core::config::{AppInfo, Config, ConfigBuilder};

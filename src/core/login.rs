@@ -21,7 +21,7 @@ pub struct WxLoginOk {
     pub skey: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct WxLoginErr {
     pub status: u16,
     pub code: String,

@@ -1,21 +1,29 @@
-use actix_web::{get, post, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, App, HttpResponse, HttpServer, Responder};
+use wx_login_middleware::preclude::*;
 
 #[get("/")]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().body("Hello world!")
 }
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
+#[get("/auth")]
+// use WxLoginInfo extractor to check authentication result
+async fn auth(login_info: wx_login::WxLoginInfo) -> impl Responder {
+    HttpResponse::Ok().body(format!("Hello, {}!", login_info.openid))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    tracing_subscriber::fmt::init();
     HttpServer::new(|| {
         App::new()
+            // add the middleware for login and authentication
+            // we use default config with app-info from environment variables
+            // (e.g. WX_APP_"TheAppID"="TheAppSecret")
+            .wrap(wx_login::actix_web::middleware_with_env_var())
             .service(hello)
-            .service(echo)
+            // `GET /auth` require login authendication
+            .service(auth)
     })
     .bind(("127.0.0.1", 8080))?
     .run()

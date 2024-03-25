@@ -1,6 +1,7 @@
 use std::{
     fmt::Display,
     future::{ready, Ready},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -8,59 +9,83 @@ use actix_web::{
     body::{BoxBody, EitherBody},
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     http, web, Error, FromRequest, HttpMessage, HttpRequest, HttpResponse, Responder,
+    ResponseError,
 };
 use futures_util::future::LocalBoxFuture;
 use serde::Deserialize;
 
 use crate::core::{
-    config::Config,
-    login::{self, Error as LoginError, WxLoginErr, WxLoginInfo, WxLoginOk, LOGIN_FAIL_MSG},
+    config::{Config, ConfigBuilder},
+    login::{
+        self, Error as LoginError, WxLoginErr, WxLoginInfo, WxLoginOk, AUTH_FAIL_MSG,
+        LOGIN_FAIL_MSG,
+    },
 };
 
 pub type WxLoginAuthResult = Result<WxLoginInfo, LoginError>;
 
-pub struct WxLogin {
+pub fn middleware_with_env_var() -> WxLoginMiddleware {
+    WxLoginMiddleware::new_with_env_var()
+}
+
+#[derive(Clone)]
+pub struct WxLoginMiddleware {
     cfg: Arc<Config>,
 }
 
-impl WxLogin {}
+impl WxLoginMiddleware {
+    pub fn new_with_env_var() -> Self {
+        Self::new(ConfigBuilder::new().with_env_var().build())
+    }
+
+    pub fn new(cfg: Config) -> Self {
+        Self { cfg: Arc::new(cfg) }
+    }
+}
 
 // Middleware factory is `Transform` trait
 // `S` - type of the next service
 // `B` - type of response's body
-impl<S, B> Transform<S, ServiceRequest> for WxLogin
+impl<S, B> Transform<S, ServiceRequest> for WxLoginMiddleware
 where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static + Clone,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
     B: 'static,
 {
     type Response = ServiceResponse<EitherBody<B>>;
     type Error = Error;
     type InitError = ();
-    type Transform = WxLoginMiddleware<S>;
+    type Transform = WxLoginMiddlewareService<S>;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(WxLoginMiddleware {
-            service,
+        ready(Ok(WxLoginMiddlewareService {
+            service: Rc::new(service),
             wx_login: login::WxLogin::new(self.cfg.clone()),
         }))
     }
 }
 
-#[derive(Clone)]
-pub struct WxLoginMiddleware<S> {
-    service: S,
+pub struct WxLoginMiddlewareService<S> {
+    service: Rc<S>,
     wx_login: login::WxLogin,
 }
 
-impl<S, B> Service<ServiceRequest> for WxLoginMiddleware<S>
+impl<S> Clone for WxLoginMiddlewareService<S> {
+    fn clone(&self) -> Self {
+        Self {
+            service: self.service.clone(),
+            wx_login: self.wx_login.clone(),
+        }
+    }
+}
+
+impl<S, B> Service<ServiceRequest> for WxLoginMiddlewareService<S>
 where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static + Clone,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
     B: 'static,
 {
-    // type Response = ServiceResponse<EitherBody<B, String>>;
     type Response = ServiceResponse<EitherBody<B>>;
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -74,7 +99,7 @@ where
             code: String,
         }
 
-        let myself = self.clone();
+        let myself = (*self).clone();
 
         Box::pin(async move {
             if req.uri().path() == "/login" {
@@ -160,6 +185,39 @@ fn err_resp<'a, E: Display>(
     }
 }
 
+impl FromRequest for WxLoginInfo {
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
+    fn from_request(req: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
+        let req = req.clone();
+        Box::pin(async move {
+            match req.extensions().get::<WxLoginAuthResult>() {
+                Some(Ok(login_info)) => Ok(login_info.clone()),
+                Some(Err(err)) => Err(WrappedWxLoginErr {
+                    err: WxLoginErr {
+                        status: 401,
+                        code: "auth-login-session-fail".into(),
+                        message: AUTH_FAIL_MSG.into(),
+                        detail: err.to_string(),
+                    },
+                    req: req.clone(),
+                }
+                .into()),
+                None => Err(WrappedWxLoginErr {
+                    err: WxLoginErr {
+                        status: 500,
+                        code: "login-session-lost".into(),
+                        message: AUTH_FAIL_MSG.into(),
+                        detail: "".into(),
+                    },
+                    req: req.clone(),
+                }
+                .into()),
+            }
+        })
+    }
+}
+
 impl Responder for WxLoginOk {
     type Body = BoxBody;
     fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
@@ -174,6 +232,29 @@ impl Responder for WxLoginErr {
         let status = self.status;
         (web::Json(self), http::StatusCode::from_u16(status).unwrap())
             .respond_to(req)
+            .map_into_boxed_body()
+    }
+}
+
+#[derive(Debug)]
+struct WrappedWxLoginErr {
+    err: WxLoginErr,
+    req: HttpRequest,
+}
+
+impl Display for WrappedWxLoginErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", self))
+    }
+}
+impl ResponseError for WrappedWxLoginErr {
+    fn status_code(&self) -> http::StatusCode {
+        http::StatusCode::from_u16(self.err.status).unwrap()
+    }
+
+    fn error_response(&self) -> HttpResponse<BoxBody> {
+        (web::Json(self.err.clone()), self.status_code())
+            .respond_to(&self.req)
             .map_into_boxed_body()
     }
 }
