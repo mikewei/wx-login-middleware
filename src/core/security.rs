@@ -139,7 +139,7 @@ impl<'a> Authority<'a> {
         ts_ms_str: &str,
         nonce_str: &str,
         sig_str: &str,
-        validate: impl FnOnce(Duration, u64) -> bool
+        validate: impl FnOnce(Duration, u64) -> bool,
     ) -> Result<(), Error> {
         let digist =
             sha1!((url.to_string() + ":" + ts_ms_str + ":" + nonce_str + ":" + skey).as_bytes());
@@ -179,6 +179,30 @@ impl SessionToken {
             tag: SESSION_TOKEN_TAG,
         }
     }
+}
+
+pub fn check_signature(sig_str: &str, data: &str, session_key: &[u8; 16]) -> bool {
+    hex::encode(&sha1!(
+        data.as_bytes(),
+        BASE64.to_text(session_key).as_bytes()
+    )) == sig_str
+}
+
+pub fn decrpyt_data(
+    encrypted_data_base64: &str,
+    iv_base64: &str,
+    session_key: &[u8; 16],
+) -> Result<String, Error> {
+    let encrypted = BASE64
+        .from_text(encrypted_data_base64)
+        .map_err(|e| e.to_string())?;
+    let iv: [u8; 16] = BASE64
+        .from_text(iv_base64)
+        .map_err(|e| e.to_string())?
+        .try_into()
+        .or(Err("iv is not 16B len"))?;
+    let decrypted = Aes128::from_key_array(session_key).decrypt_with_iv(&iv, &encrypted);
+    String::from_utf8(decrypted).map_err(|e| e.to_string().into())
 }
 
 pub mod secret_utils {
@@ -242,5 +266,21 @@ mod tests {
             format!("{:?}", sec_str),
             "SecretString(\"abcd**************\")"
         );
+    }
+    #[test]
+    fn check_signature_test() {
+        let sig_str = "bb9f4e5a947d1b8e1ce59c10fad753f954e97856";
+        let data = r#"{"nickName":"韦彬","gender":0,"language":"zh_CN","city":"","province":"","country":"","avatarUrl":"https://thirdwx.qlogo.cn/mmopen/vi_32/DYAIOgq83eq9ld3vawfuoLSHlN39xryF4Tdpsz5fBGfdeiarQkVKxvCnjrsVlmWU59KYJd7vvaKhNgPfREQ9iang/132"}"#;
+        let key: [u8; 16] = BASE64.from_text("/rwbJA677wrIqaPPLIzwSg==").unwrap().try_into().unwrap();
+        assert!(check_signature(sig_str, data, &key));
+    }
+    #[test]
+    fn decrypt_data_test() {
+        let encrypted = "CfmlE917TYmWSMDAJ3MZLJTc1ZdTS5S/XUDnf785IlA+4IR80ABSTj+eGqIbqEshNZCAxkid3LnY6VJipJVZN0OeUqWykj0lVFpH7F39jY1a+CkpSwWwMTlCN6Bc57AX/a9phKunccXSLM7X0Nw2VPLxqlRsUrSYfXN5oZpGHbJRVbDsw95mw59N9jPpTY01EhAJZGtKE+W/YOWTXWPQ6IkhRx9WSJxVuVK0nCXvIqQw6zQuSesCurokvMcPWMArKBubLY9vznZ5MUfj51Mptx6UUQoizHbtyNVKEeotMPup6cqh7axP/Y6ae/6Yb7XQW1mEF6SrxzK0C1RgAI2F9JfbKY8Ubl3hlXNydrgHoP+9j/C7aRIRpeWeCUeSOOIqoZzuwN/CYolLIhkjK1POeg==";
+        let iv = "J3IBEDAC0mBW1nQK5F1jFQ==";
+        let key: [u8; 16] = BASE64.from_text("/rwbJA677wrIqaPPLIzwSg==").unwrap().try_into().unwrap();
+        let decrypted = decrpyt_data(encrypted, iv, &key).unwrap();
+        let plain = r#"{"nickName":"韦彬","gender":0,"language":"zh_CN","city":"","province":"","country":"","avatarUrl":"https://thirdwx.qlogo.cn/mmopen/vi_32/DYAIOgq83eq9ld3vawfuoLSHlN39xryF4Tdpsz5fBGfdeiarQkVKxvCnjrsVlmWU59KYJd7vvaKhNgPfREQ9iang/132","watermark":{"timestamp":1708708886,"appid":"wx25581781a863c770"}}"#;
+        assert_eq!(decrypted, plain);
     }
 }

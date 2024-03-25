@@ -13,4 +13,5 @@ pub mod wx_login {
     }
     pub use crate::core::config::{AppInfo, Config, ConfigBuilder};
     pub use crate::core::login::{Error, WxLogin, WxLoginErr, WxLoginInfo, WxLoginOk};
+    pub use crate::core::security::{check_signature, decrpyt_data};
 }
