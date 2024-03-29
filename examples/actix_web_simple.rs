@@ -18,7 +18,8 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             // add the middleware for login and authentication
-            // we use default config with app-info from environment variables
+            // by default the login API is `GET|POST /login`
+            // here we use config of app-info from environment variables
             // (e.g. WX_APP_"TheAppID"="TheAppSecret")
             .wrap(wx_login::actix_web::middleware_with_env_var())
             .service(hello)

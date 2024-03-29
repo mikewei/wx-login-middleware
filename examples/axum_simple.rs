@@ -13,7 +13,8 @@ async fn main() {
         // `GET /auth` goes to `auth` which require login authendication
         .route("/auth", get(auth))
         // add the layer of wx_login_middleware for login and authentication
-        // we use default config with app-info from environment variables
+        // by default the login API is `GET|POST /login`
+        // here we use default config of app-info from environment variables
         // (e.g. WX_APP_"TheAppID"="TheAppSecret")
         .layer(wx_login::axum::layer_with_env_var());
 

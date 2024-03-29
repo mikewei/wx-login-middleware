@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tiny_crypto::{
     encoding::{Encoder, BASE64},
-    sha1,
+    sha1, sha1_hex,
     sym::{Aes128, Cipher},
 };
 
@@ -57,19 +57,19 @@ impl<'a> Authority<'a> {
     }
 
     fn make_token_key(&self, openid: &str) -> [u8; 16] {
-        tiny_crypto::sha1!(self.app_info.secret.0.as_bytes(), openid.as_bytes())[..16]
+        sha1!(self.app_info.secret.0.as_bytes(), openid.as_bytes())[..16]
             .try_into()
             .unwrap()
     }
 
     fn make_token_iv(&self, openid: &str) -> [u8; 16] {
-        tiny_crypto::sha1!(self.app_info.appid.as_bytes(), openid.as_bytes())[..16]
+        sha1!(self.app_info.appid.as_bytes(), openid.as_bytes())[..16]
             .try_into()
             .unwrap()
     }
 
     fn make_client_sess_key(&self, session_key: &[u8; 16], seed: u32) -> [u8; 16] {
-        tiny_crypto::sha1!(session_key, &bincode::serialize(&seed).unwrap())[..16]
+        sha1!(session_key, &bincode::serialize(&seed).unwrap())[..16]
             .try_into()
             .unwrap()
     }
@@ -141,9 +141,10 @@ impl<'a> Authority<'a> {
         sig_str: &str,
         validate: impl FnOnce(Duration, u64) -> bool,
     ) -> Result<(), Error> {
-        let digist =
-            sha1!((url.to_string() + ":" + ts_ms_str + ":" + nonce_str + ":" + skey).as_bytes());
-        if hex::encode(digist) != sig_str {
+        let digist = sha1_hex!(
+            (url.to_string() + ":" + ts_ms_str + ":" + nonce_str + ":" + skey).as_bytes()
+        );
+        if digist != sig_str {
             Err("bad sig value")?;
         }
         let ts_ms = ts_ms_str.parse::<u64>().map_err(|e| e.to_string())?;
@@ -182,10 +183,7 @@ impl SessionToken {
 }
 
 pub fn check_signature(sig_str: &str, data: &str, session_key: &[u8; 16]) -> bool {
-    hex::encode(&sha1!(
-        data.as_bytes(),
-        BASE64.to_text(session_key).as_bytes()
-    )) == sig_str
+    sha1_hex!(data.as_bytes(), BASE64.to_text(session_key).as_bytes()) == sig_str
 }
 
 pub fn decrpyt_data(
@@ -271,14 +269,22 @@ mod tests {
     fn check_signature_test() {
         let sig_str = "bb9f4e5a947d1b8e1ce59c10fad753f954e97856";
         let data = r#"{"nickName":"韦彬","gender":0,"language":"zh_CN","city":"","province":"","country":"","avatarUrl":"https://thirdwx.qlogo.cn/mmopen/vi_32/DYAIOgq83eq9ld3vawfuoLSHlN39xryF4Tdpsz5fBGfdeiarQkVKxvCnjrsVlmWU59KYJd7vvaKhNgPfREQ9iang/132"}"#;
-        let key: [u8; 16] = BASE64.from_text("/rwbJA677wrIqaPPLIzwSg==").unwrap().try_into().unwrap();
+        let key: [u8; 16] = BASE64
+            .from_text("/rwbJA677wrIqaPPLIzwSg==")
+            .unwrap()
+            .try_into()
+            .unwrap();
         assert!(check_signature(sig_str, data, &key));
     }
     #[test]
     fn decrypt_data_test() {
         let encrypted = "CfmlE917TYmWSMDAJ3MZLJTc1ZdTS5S/XUDnf785IlA+4IR80ABSTj+eGqIbqEshNZCAxkid3LnY6VJipJVZN0OeUqWykj0lVFpH7F39jY1a+CkpSwWwMTlCN6Bc57AX/a9phKunccXSLM7X0Nw2VPLxqlRsUrSYfXN5oZpGHbJRVbDsw95mw59N9jPpTY01EhAJZGtKE+W/YOWTXWPQ6IkhRx9WSJxVuVK0nCXvIqQw6zQuSesCurokvMcPWMArKBubLY9vznZ5MUfj51Mptx6UUQoizHbtyNVKEeotMPup6cqh7axP/Y6ae/6Yb7XQW1mEF6SrxzK0C1RgAI2F9JfbKY8Ubl3hlXNydrgHoP+9j/C7aRIRpeWeCUeSOOIqoZzuwN/CYolLIhkjK1POeg==";
         let iv = "J3IBEDAC0mBW1nQK5F1jFQ==";
-        let key: [u8; 16] = BASE64.from_text("/rwbJA677wrIqaPPLIzwSg==").unwrap().try_into().unwrap();
+        let key: [u8; 16] = BASE64
+            .from_text("/rwbJA677wrIqaPPLIzwSg==")
+            .unwrap()
+            .try_into()
+            .unwrap();
         let decrypted = decrpyt_data(encrypted, iv, &key).unwrap();
         let plain = r#"{"nickName":"韦彬","gender":0,"language":"zh_CN","city":"","province":"","country":"","avatarUrl":"https://thirdwx.qlogo.cn/mmopen/vi_32/DYAIOgq83eq9ld3vawfuoLSHlN39xryF4Tdpsz5fBGfdeiarQkVKxvCnjrsVlmWU59KYJd7vvaKhNgPfREQ9iang/132","watermark":{"timestamp":1708708886,"appid":"wx25581781a863c770"}}"#;
         assert_eq!(decrypted, plain);
