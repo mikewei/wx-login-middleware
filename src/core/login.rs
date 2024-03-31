@@ -6,7 +6,9 @@ use std::time::Duration;
 use std::{fmt::Display, sync::Arc};
 use tiny_crypto::encoding::{Encoder, BASE64};
 
+/// The error type of Result used in this crate.
 pub use crate::core::security::Error;
+/// The secret part such as keys in WxLoginInfo
 pub use crate::core::security::ServerSession as Secret;
 
 pub(crate) const LOGIN_FAIL_MSG: &str = "登录验证失败";
@@ -14,6 +16,7 @@ pub(crate) const LOGIN_FAIL_MSG: &str = "登录验证失败";
 pub(crate) const AUTH_FAIL_MSG: &str = "登录会话验证失败";
 pub(crate) const WX_JSCODE2SESSION_URL: &str = "https://api.weixin.qq.com/sns/jscode2session";
 
+/// The login ok result.
 #[derive(Serialize, Debug)]
 pub struct WxLoginOk {
     pub openid: String,
@@ -21,6 +24,7 @@ pub struct WxLoginOk {
     pub skey: String,
 }
 
+/// The login fail result.
 #[derive(Serialize, Debug, Clone)]
 pub struct WxLoginErr {
     pub status: u16,
@@ -29,6 +33,7 @@ pub struct WxLoginErr {
     pub detail: String,
 }
 
+/// The inner struct of [WxLoginInfo].
 #[derive(Debug)]
 pub struct WxLoginInfoInner {
     pub appid: String,
@@ -37,6 +42,7 @@ pub struct WxLoginInfoInner {
     pub sig_authed: bool,
 }
 
+/// The authentication result for login status. 
 #[derive(Debug, Clone)]
 pub struct WxLoginInfo(Arc<WxLoginInfoInner>);
 impl WxLoginInfo {
@@ -51,16 +57,19 @@ impl std::ops::Deref for WxLoginInfo {
     }
 }
 
+/// The core struct for login and authentication process.
 #[derive(Debug, Clone)]
 pub struct WxLogin {
     cfg: Arc<Config>,
 }
 
 impl WxLogin {
+    /// Create a new WxLogin with Config.
     pub fn new(cfg: Arc<Config>) -> Self {
         Self { cfg }
     }
 
+    /// Handle login request.
     #[tracing::instrument(err(Debug), ret, skip_all)]
     pub async fn handle_login(&self, appid: String, code: String) -> Result<WxLoginOk, WxLoginErr> {
         tracing::info!("start handle_login({appid}, {code})");
@@ -101,6 +110,7 @@ impl WxLogin {
         })
     }
 
+    /// Authenticate login status.
     #[tracing::instrument(err, ret, skip(self))]
     pub fn authenticate(
         &self,

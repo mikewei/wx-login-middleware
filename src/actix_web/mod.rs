@@ -22,12 +22,14 @@ use crate::core::{
     },
 };
 
-pub type WxLoginAuthResult = Result<WxLoginInfo, LoginError>;
+type WxLoginAuthResult = Result<WxLoginInfo, LoginError>;
 
+/// Create a [WxLoginMiddleware] with config derived from environment variables and default values.
 pub fn middleware_with_env_var() -> WxLoginMiddleware {
     WxLoginMiddleware::new_with_env_var()
 }
 
+/// A actix-web middleware wrapping the functionality of this crate.
 #[derive(Clone)]
 pub struct WxLoginMiddleware {
     cfg: Arc<Config>,
@@ -66,6 +68,7 @@ where
     }
 }
 
+/// A actix-web middleware service created by [WxLoginMiddleware].
 pub struct WxLoginMiddlewareService<S> {
     service: Rc<S>,
     wx_login: login::WxLogin,

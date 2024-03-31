@@ -182,10 +182,12 @@ impl SessionToken {
     }
 }
 
+/// Check the signature signed by client using skey.
 pub fn check_signature(sig_str: &str, data: &str, session_key: &[u8; 16]) -> bool {
     sha1_hex!(data.as_bytes(), BASE64.to_text(session_key).as_bytes()) == sig_str
 }
 
+/// Decrypt encrypted data returned from WeChat server.
 pub fn decrpyt_data(
     encrypted_data_base64: &str,
     iv_base64: &str,

@@ -20,22 +20,26 @@ use crate::core::{
     login::{Error, WxLogin, WxLoginErr, WxLoginInfo, WxLoginOk, AUTH_FAIL_MSG, LOGIN_FAIL_MSG},
 };
 
-pub type WxLoginAuthResult = Result<WxLoginInfo, Error>;
+type WxLoginAuthResult = Result<WxLoginInfo, Error>;
 
+/// Create a [WxLoginLayer] with config derived from environment variables and default values.
 pub fn layer_with_env_var() -> WxLoginLayer {
     WxLoginLayer::new_with_env_var()
 }
 
+/// An axum layer (middleware) wrapping the functionality of this crate.
 #[derive(Clone)]
 pub struct WxLoginLayer {
     cfg: Arc<Config>,
 }
 
 impl WxLoginLayer {
+    /// Create a [WxLoginLayer] with config derived from environment variables and default values.
     pub fn new_with_env_var() -> Self {
         Self::new(ConfigBuilder::new().with_env_var().build())
     }
 
+    /// Create a [WxLoginLayer] with specified config.
     pub fn new(cfg: Config) -> Self {
         Self { cfg: Arc::new(cfg) }
     }
@@ -52,6 +56,7 @@ impl<S> Layer<S> for WxLoginLayer {
     }
 }
 
+/// An axum service created by [WxLoginLayer].
 #[derive(Clone)]
 pub struct WxLoginService<S> {
     inner: S,
@@ -152,6 +157,7 @@ fn err_resp<E: Display>(status: u16, code: &str) -> impl '_ + FnOnce(E) -> Respo
     }
 }
 
+/// The rejection type of the [WxLoginInfo] extractor.
 pub type WxLoginInfoRejection = WxLoginErr;
 
 #[async_trait]

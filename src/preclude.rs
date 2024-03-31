@@ -2,7 +2,7 @@ pub mod wx_login {
     #[cfg(feature = "axum")]
     pub mod axum {
         pub use crate::axum::{
-            layer_with_env_var, WxLoginAuthResult, WxLoginInfoRejection, WxLoginLayer, WxLoginService,
+            layer_with_env_var, WxLoginInfoRejection, WxLoginLayer, WxLoginService,
         };
     }
     #[cfg(feature = "axum")]
