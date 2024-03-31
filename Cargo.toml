@@ -2,6 +2,12 @@
 name = "wx-login-middleware"
 version = "0.1.0"
 edition = "2021"
+authors = ["mikewei@github"]
+readme = "README.md"
+license = "MIT"
+homepage = "https://github.com/mikewei/wx-login-middleware"
+repository = "https://github.com/mikewei/wx-login-middleware"
+description = "A Rust library that provides WeChat mini-program login and authentication functionalities in the form of middleware of popular web-frameworks, making it convenient to use."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
